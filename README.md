@@ -1,34 +1,52 @@
-# Local Actions Runner
+# laction (Local Actions Runner)
 
-A shell-based tool to run GitHub Actions steps locally using Docker.
+A privacy-focused, shell-based tool to run GitHub Actions steps locally using Docker. Perfect for testing workflows without committing or dealing with GitHub secrets and releases.
 
 ## Features
 
-- Parses GitHub Actions workflow files (YAML).
-- Runs shell commands (`run` steps) inside a Docker container.
-- **Privacy Focused**: Automatically detects and skips steps that reference GitHub secrets (`${{ secrets... }}`) to prevent credential leaks.
+- **TUI-inspired Output**: Clean, color-coded terminal interface.
+- **Privacy Focused**: Automatically detects and skips steps that reference GitHub secrets (`${{ secrets... }}`) or `github.token`.
+- **Debug Mode**: Enable verbose debugging with `DEBUG=true`.
+- **Lightweight**: Minimal dependencies (`yq`, `docker`).
 
-## Prerequisites
+## Quick Setup (One-liner)
 
-- Docker
-- yq (YAML processor)
+```bash
+curl -sSL https://raw.githubusercontent.com/the-abra/local-actions/main/install.sh | bash
+```
+
+## Manual Installation
+
+```bash
+git clone https://github.com/the-abra/local-actions.git
+cd local-actions
+chmod +x laction
+sudo ln -sf $(pwd)/laction /usr/local/bin/laction
+```
 
 ## Usage
 
 ```bash
-./run-local.sh <workflow-file> <docker-image> [job-name]
+laction <workflow-file> <docker-image> [job-name]
 ```
 
 ### Example
 
 ```bash
-./run-local.sh examples/ci.yml ubuntu:latest
+laction examples/ci.yml ubuntu:latest
+```
+
+### Debugging
+
+To see raw step data and execution details:
+```bash
+DEBUG=true laction examples/ci.yml ubuntu:latest
 ```
 
 ## Contributing
 
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to get started.
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+MIT License. See [LICENSE](LICENSE) for details.

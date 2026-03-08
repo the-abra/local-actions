@@ -1,4 +1,5 @@
 # Temporary script files
+.laction-step-*.sh
 .local-runner-step-*.sh
 
 # OS generated files

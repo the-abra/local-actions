@@ -7,7 +7,7 @@ Thank you for your interest in improving Local Actions Runner!
 1.  **Fork the repository.**
 2.  **Create a new branch** for your feature or bug fix.
 3.  **Implement your changes.**
-4.  **Test your changes** by running the `run-local.sh` script with various workflow files.
+4.  **Test your changes** by running the `laction` script with various workflow files.
 5.  **Submit a Pull Request** with a clear description of your changes.
 
 ## Development Requirements
