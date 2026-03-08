@@ -25,6 +25,12 @@ if ! command -v yq &> /dev/null; then
     exit 1
 fi
 
+# Function to check if docker is installed
+if ! command -v docker &> /dev/null; then
+    echo "Error: docker is required."
+    exit 1
+fi
+
 # Detect Job Name if not provided
 if [ -z "$JOB_NAME" ]; then
     JOB_NAME=$(yq -r '.jobs | keys | .[0]' "$WORKFLOW_FILE")
