@@ -1,0 +1,29 @@
+name: CI
+
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Run valid script
+        run: echo "Hello, World! This is a local run."
+
+      - name: Install dependencies
+        run: |
+          echo "Installing dependencies..."
+          ls -la
+
+      - name: Deploy with secrets
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+        run: echo "Deploying using secret key..."
+
+      - name: Another secret step
+        run: echo "Token is ${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Final step
+        run: echo "Build complete."
