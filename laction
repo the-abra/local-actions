@@ -33,17 +33,19 @@ check_deps() {
 }
 
 usage() {
-    echo -e "${BOLD}Usage:${NC} laction <workflow-file> <docker-image> [job-name]"
-    echo -e "Example: laction examples/ci.yml ubuntu:latest"
+    echo -e "${BOLD}Usage:${NC} laction <workflow-file> [docker-image] [job-name]"
+    echo -e "Example 1: laction examples/ci.yml                 (uses image from YAML)"
+    echo -e "Example 2: laction examples/ci.yml ubuntu:latest    (uses specified image)"
+    echo -e "Example 3: laction examples/ci.yml build            (runs 'build' job using image from YAML)"
 }
 
 check_deps
 
 WORKFLOW_FILE="$1"
-IMAGE="$2"
+IMAGE_OR_JOB="$2"
 JOB_NAME="$3"
 
-if [ -z "$WORKFLOW_FILE" ] || [ -z "$IMAGE" ]; then
+if [ -z "$WORKFLOW_FILE" ]; then
     usage
     exit 1
 fi
@@ -53,11 +55,56 @@ if [ ! -f "$WORKFLOW_FILE" ]; then
     exit 1
 fi
 
-# Detect Job Name
-if [ -z "$JOB_NAME" ]; then
+# Flexible Argument Handling
+if [ -z "$IMAGE_OR_JOB" ]; then
+    # Only workflow file provided: laction <workflow-file>
     JOB_NAME=$(yq -r '.jobs | keys | .[0]' "$WORKFLOW_FILE")
-    log_info "No job specified. Using first job: ${BOLD}$JOB_NAME${NC}"
+    IMAGE=""
+elif [ -n "$JOB_NAME" ]; then
+    # Three arguments provided: laction <workflow-file> <image> <job>
+    IMAGE="$IMAGE_OR_JOB"
+else
+    # Two arguments provided: laction <workflow-file> <arg2>
+    # Check if <arg2> is a job name in the YAML
+    IS_JOB=$(yq -r --arg ARG "$IMAGE_OR_JOB" '.jobs | has($ARG)' "$WORKFLOW_FILE")
+    if [ "$IS_JOB" = "true" ]; then
+        # arg2 is a job name: laction <workflow-file> <job>
+        JOB_NAME="$IMAGE_OR_JOB"
+        IMAGE=""
+    else
+        # arg2 is an image: laction <workflow-file> <image>
+        IMAGE="$IMAGE_OR_JOB"
+        JOB_NAME=$(yq -r '.jobs | keys | .[0]' "$WORKFLOW_FILE")
+    fi
 fi
+
+# Fetch image from YAML if not provided
+if [ -z "$IMAGE" ]; then
+    log_info "No image specified. Fetching from '$WORKFLOW_FILE' for job '${BOLD}$JOB_NAME${NC}'..."
+    IMAGE=$(yq -r --arg JOB_NAME "$JOB_NAME" '.jobs[$JOB_NAME]["runs-on"]' "$WORKFLOW_FILE")
+    
+    if [ "$IMAGE" = "null" ] || [ -z "$IMAGE" ]; then
+        log_error "Could not find 'runs-on' image for job '$JOB_NAME' in '$WORKFLOW_FILE'."
+        exit 1
+    fi
+    log_info "Found image: ${BOLD}$IMAGE${NC}"
+fi
+
+# Map GitHub runner names to Docker images
+case "$IMAGE" in
+    "ubuntu-latest"|"ubuntu-24.04")
+        log_info "Mapping '${BOLD}$IMAGE${NC}' to 'ubuntu:latest'"
+        IMAGE="ubuntu:latest"
+        ;;
+    "ubuntu-22.04")
+        log_info "Mapping '${BOLD}$IMAGE${NC}' to 'ubuntu:22.04'"
+        IMAGE="ubuntu:22.04"
+        ;;
+    "ubuntu-20.04")
+        log_info "Mapping '${BOLD}$IMAGE${NC}' to 'ubuntu:20.04'"
+        IMAGE="ubuntu:20.04"
+        ;;
+esac
 
 log_info "Preparing job '${BOLD}$JOB_NAME${NC}' from '$WORKFLOW_FILE' in '$IMAGE'..."
 
