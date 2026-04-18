@@ -9,18 +9,19 @@ set -e
 # Colors for TUI
 BLUE='\033[0;34m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
+YELLOW='\033[0;33m'
 RED='\033[0;31m'
+GRAY='\033[0;90m'
 NC='\033[0m' # No Color
 BOLD='\033[1m'
 
 DEBUG=${DEBUG:-false}
 
-log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
-log_debug() { if [ "$DEBUG" = "true" ]; then echo -e "${BOLD}[DEBUG]${NC} $1"; fi; }
+log_info() { echo -e "${GRAY}info${NC} $1"; }
+log_success() { echo -e "${GREEN}done${NC} $1"; }
+log_warn() { echo -e "${YELLOW}warn${NC} $1"; }
+log_error() { echo -e "${RED}fail${NC} $1"; }
+log_debug() { if [ "$DEBUG" = "true" ]; then echo -e "${GRAY}debug${NC} $1"; fi; }
 
 # Check dependencies
 check_deps() {
@@ -123,7 +124,7 @@ STEP_COUNT=$(yq -r --arg JOB_NAME "$JOB_NAME" '.jobs[$JOB_NAME].steps | length' 
 log_info "Found $STEP_COUNT steps."
 
 for (( i=0; i<$STEP_COUNT; i++ )); do
-    echo -e "${BLUE}───────────────────────────────────────────────────${NC}"
+    echo -e "${GRAY}───────────────────────────────────────────────────${NC}"
     
     STEP_NAME=$(yq -r --arg JOB_NAME "$JOB_NAME" --argjson idx "$i" '.jobs[$JOB_NAME].steps[$idx].name // "Step \($idx + 1)"' "$WORKFLOW_FILE")
     STEP_RUN=$(yq -r --arg JOB_NAME "$JOB_NAME" --argjson idx "$i" '.jobs[$JOB_NAME].steps[$idx].run' "$WORKFLOW_FILE")
@@ -137,7 +138,7 @@ for (( i=0; i<$STEP_COUNT; i++ )); do
         continue
     fi
 
-    log_info "▶️  Running '${BOLD}$STEP_NAME${NC}'"
+    log_info "running '${BOLD}$STEP_NAME${NC}'"
 
     if [ "$STEP_USES" != "null" ]; then
         log_warn "Action usage '$STEP_USES' detected. (Not supported, skipping)"
@@ -166,5 +167,5 @@ for (( i=0; i<$STEP_COUNT; i++ )); do
     fi
 done
 
-echo -e "${BLUE}───────────────────────────────────────────────────${NC}"
+echo -e "${GRAY}───────────────────────────────────────────────────${NC}"
 log_success "Job '${BOLD}$JOB_NAME${NC}' completed successfully."
