@@ -1,52 +1,96 @@
-# laction (Local Actions Runner)
+# laction
 
-A privacy-focused, shell-based tool to run GitHub Actions steps locally using Docker. Perfect for testing workflows without committing or dealing with GitHub secrets and releases.
+A simple alternative to `act` — run your project's build, test, and lint steps locally in Docker using a plain `laction.ini` config file.
 
-## Features
+No GitHub Actions YAML. No runner emulation. Just a profile, an image, and a command.
 
-- **TUI-inspired Output**: Clean, color-coded terminal interface.
-- **Privacy Focused**: Automatically detects and skips steps that reference GitHub secrets (`${{ secrets... }}`) or `github.token`.
-- **Debug Mode**: Enable verbose debugging with `DEBUG=true`.
-- **Lightweight**: Minimal dependencies (`yq`, `docker`).
-
-## Quick Setup (One-liner)
+## Install
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/the-abra/local-actions/main/install.sh | bash
 ```
 
-## Manual Installation
+Or manually:
 
 ```bash
 git clone https://github.com/the-abra/local-actions.git
 cd local-actions
-chmod +x laction
 sudo ln -sf $(pwd)/laction /usr/local/bin/laction
 ```
 
 ## Usage
 
 ```bash
-laction <workflow-file> <docker-image> [job-name]
+laction [project-path] [profile]
 ```
 
-### Example
+| Command | What it does |
+|---|---|
+| `laction` | runs `[default]` in current directory |
+| `laction ./myproject` | runs `[default]` in `./myproject` |
+| `laction ./myproject test` | runs `[test]` in `./myproject` |
+
+## laction.ini
+
+Place a `laction.ini` in your project root:
+
+```ini
+[default]
+image = ubuntu:latest
+run = ./scripts/build.sh
+
+[test]
+image = ubuntu:latest
+run = ./scripts/test.sh
+
+[lint]
+image = node:20
+run = npm run lint
+```
+
+Profile names are arbitrary — but by convention:
+
+| Profile | Purpose |
+|---|---|
+| `default` | Runs when no profile is specified. Typically a build or sanity check. |
+| `build` | Compiles or packages the project. |
+| `test` | Runs the test suite. |
+| `lint` | Checks code style and formatting. |
+
+You can name profiles anything: `deploy`, `migrate`, `docs`, etc.
+
+Each profile defines an image and a command (or script path) to run inside a temporary container. The project directory is mounted at `/workspace`.
+
+## Container defaults
+
+Each profile runs in a fresh, temporary container with these defaults:
+
+| Setting | Value |
+|---|---|
+| Volume mount | `<project-dir>` → `/workspace` |
+| Working directory | `/workspace` |
+| Lifecycle | Removed after run (`--rm`) |
+| Shell | `sh -c` |
+
+Your project files are available at `/workspace` inside the container. Scripts referenced in `run` are resolved relative to `/workspace`.
+
+## Output
+
+```
+info  profile [test] → ubuntu:latest
+info  run: ./scripts/test.sh
+───────────────────────────────────────────────────
+... container output ...
+───────────────────────────────────────────────────
+done  Profile 'test' completed.
+```
+
+## Debug
 
 ```bash
-laction examples/ci.yml ubuntu:latest
+DEBUG=true laction ./myproject test
 ```
 
-### Debugging
+## Requirements
 
-To see raw step data and execution details:
-```bash
-DEBUG=true laction examples/ci.yml ubuntu:latest
-```
-
-## Contributing
-
-Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
+- `docker`

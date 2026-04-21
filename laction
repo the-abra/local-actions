@@ -1,171 +1,102 @@
 #!/bin/bash
-
-# laction
-# Run GitHub Actions locally with Docker (Privacy focused)
-# Usage: laction <workflow-file> <docker-image> [job-name]
+# laction — Run project steps locally in Docker via laction.ini
+# Usage: laction [project-path] [profile]
 
 set -e
 
-# Colors for TUI
-BLUE='\033[0;34m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-RED='\033[0;31m'
-GRAY='\033[0;90m'
-NC='\033[0m' # No Color
-BOLD='\033[1m'
+# ─── Output ───────────────────────────────────────────────────────────────────
 
+GREEN='\033[0;32m'; YELLOW='\033[0;33m'
+RED='\033[0;31m'; GRAY='\033[0;90m'; NC='\033[0m'; BOLD='\033[1m'
 DEBUG=${DEBUG:-false}
 
-log_info() { echo -e "${GRAY}info${NC} $1"; }
+log_info()    { echo -e "${GRAY}info${NC} $1"; }
 log_success() { echo -e "${GREEN}done${NC} $1"; }
-log_warn() { echo -e "${YELLOW}warn${NC} $1"; }
-log_error() { echo -e "${RED}fail${NC} $1"; }
-log_debug() { if [ "$DEBUG" = "true" ]; then echo -e "${GRAY}debug${NC} $1"; fi; }
+log_warn()    { echo -e "${YELLOW}warn${NC} $1"; }
+log_error()   { echo -e "${RED}fail${NC} $1"; }
+log_debug()   { [ "$DEBUG" = "true" ] && echo -e "${GRAY}debug${NC} $1" || true; }
 
-# Check dependencies
-check_deps() {
-    for dep in yq docker; do
-        if ! command -v "$dep" &> /dev/null; then
-            log_error "$dep is required but not installed."
-            exit 1
+# ─── INI Parser ───────────────────────────────────────────────────────────────
+
+# ini_get <file> <section> <key>
+ini_get() {
+    local file="$1" section="$2" key="$3" in_section=false
+    while IFS= read -r line; do
+        [[ "$line" =~ ^[[:space:]]*# ]] && continue
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [[ -z "$line" ]] && continue
+        local nows="${line//[[:space:]]/}"
+        if [[ "$nows" == "[$section]" ]]; then in_section=true; continue; fi
+        if [[ "$nows" == \[* ]]; then in_section=false; continue; fi
+        if $in_section && [[ "$nows" == "$key="* ]]; then
+            local val="${line#*=}"
+            val="${val#"${val%%[![:space:]]*}"}"
+            echo "$val"; return
         fi
-    done
+    done < "$file"
 }
+
+# ini_sections <file>
+ini_sections() { grep -oP '(?<=\[)[^\]]+' "$1"; }
+
+# ─── Runner Image Mapping ─────────────────────────────────────────────────────
+
+map_image() {
+    case "$1" in
+        ubuntu-latest|ubuntu-24.04) echo "ubuntu:latest" ;;
+        ubuntu-22.04)               echo "ubuntu:22.04"  ;;
+        ubuntu-20.04)               echo "ubuntu:20.04"  ;;
+        *)                          echo "$1"            ;;
+    esac
+}
+
+# ─── Usage ────────────────────────────────────────────────────────────────────
 
 usage() {
-    echo -e "${BOLD}Usage:${NC} laction <workflow-file> [docker-image] [job-name]"
-    echo -e "Example 1: laction examples/ci.yml                 (uses image from YAML)"
-    echo -e "Example 2: laction examples/ci.yml ubuntu:latest    (uses specified image)"
-    echo -e "Example 3: laction examples/ci.yml build            (runs 'build' job using image from YAML)"
+    echo -e "${BOLD}Usage:${NC} laction [project-path] [profile]"
+    echo -e ""
+    echo -e "  laction                   run [default] profile in current directory"
+    echo -e "  laction ./myproject       run [default] profile in ./myproject"
+    echo -e "  laction ./myproject test  run [test] profile in ./myproject"
+    echo -e ""
+    echo -e "Requires a ${BOLD}laction.ini${NC} in the project directory."
 }
 
-check_deps
+# ─── Main ─────────────────────────────────────────────────────────────────────
 
-WORKFLOW_FILE="$1"
-IMAGE_OR_JOB="$2"
-JOB_NAME="$3"
+command -v docker &>/dev/null || { log_error "docker is required but not installed."; exit 1; }
 
-if [ -z "$WORKFLOW_FILE" ]; then
-    usage
-    exit 1
-fi
+TARGET="${1:-.}"
+PROFILE="${2:-default}"
 
-if [ ! -f "$WORKFLOW_FILE" ]; then
-    log_error "Workflow file '$WORKFLOW_FILE' not found."
-    exit 1
-fi
-
-# Flexible Argument Handling
-if [ -z "$IMAGE_OR_JOB" ]; then
-    # Only workflow file provided: laction <workflow-file>
-    JOB_NAME=$(yq -r '.jobs | keys | .[0]' "$WORKFLOW_FILE")
-    IMAGE=""
-elif [ -n "$JOB_NAME" ]; then
-    # Three arguments provided: laction <workflow-file> <image> <job>
-    IMAGE="$IMAGE_OR_JOB"
+# Resolve project dir
+if [ -d "$TARGET" ]; then
+    PROJECT_DIR="$(cd "$TARGET" && pwd)"
+elif [ -z "$1" ]; then
+    PROJECT_DIR="$(pwd)"
 else
-    # Two arguments provided: laction <workflow-file> <arg2>
-    # Check if <arg2> is a job name in the YAML
-    IS_JOB=$(yq -r --arg ARG "$IMAGE_OR_JOB" '.jobs | has($ARG)' "$WORKFLOW_FILE")
-    if [ "$IS_JOB" = "true" ]; then
-        # arg2 is a job name: laction <workflow-file> <job>
-        JOB_NAME="$IMAGE_OR_JOB"
-        IMAGE=""
-    else
-        # arg2 is an image: laction <workflow-file> <image>
-        IMAGE="$IMAGE_OR_JOB"
-        JOB_NAME=$(yq -r '.jobs | keys | .[0]' "$WORKFLOW_FILE")
-    fi
+    log_error "'$TARGET' is not a directory."
+    usage; exit 1
 fi
 
-# Fetch image from YAML if not provided
-if [ -z "$IMAGE" ]; then
-    log_info "No image specified. Fetching from '$WORKFLOW_FILE' for job '${BOLD}$JOB_NAME${NC}'..."
-    IMAGE=$(yq -r --arg JOB_NAME "$JOB_NAME" '.jobs[$JOB_NAME]["runs-on"]' "$WORKFLOW_FILE")
-    
-    if [ "$IMAGE" = "null" ] || [ -z "$IMAGE" ]; then
-        log_error "Could not find 'runs-on' image for job '$JOB_NAME' in '$WORKFLOW_FILE'."
-        exit 1
-    fi
-    log_info "Found image: ${BOLD}$IMAGE${NC}"
-fi
+INI="$PROJECT_DIR/laction.ini"
+[ -f "$INI" ] || { log_error "No laction.ini found in '$PROJECT_DIR'."; usage; exit 1; }
 
-# Map GitHub runner names to Docker images
-case "$IMAGE" in
-    "ubuntu-latest"|"ubuntu-24.04")
-        log_info "Mapping '${BOLD}$IMAGE${NC}' to 'ubuntu:latest'"
-        IMAGE="ubuntu:latest"
-        ;;
-    "ubuntu-22.04")
-        log_info "Mapping '${BOLD}$IMAGE${NC}' to 'ubuntu:22.04'"
-        IMAGE="ubuntu:22.04"
-        ;;
-    "ubuntu-20.04")
-        log_info "Mapping '${BOLD}$IMAGE${NC}' to 'ubuntu:20.04'"
-        IMAGE="ubuntu:20.04"
-        ;;
-esac
+IMAGE=$(ini_get "$INI" "$PROFILE" "image")
+RUN=$(ini_get   "$INI" "$PROFILE" "run")
 
-log_info "Preparing job '${BOLD}$JOB_NAME${NC}' from '$WORKFLOW_FILE' in '$IMAGE'..."
+[ -z "$IMAGE" ] && { log_error "No 'image' key in [$PROFILE]."; exit 1; }
+[ -z "$RUN"   ] && { log_error "No 'run' key in [$PROFILE].";   exit 1; }
 
-CONTAINER_NAME="laction-$(date +%s)"
+IMAGE=$(map_image "$IMAGE")
 
-cleanup() {
-    log_info "Stopping container..."
-    docker stop "$CONTAINER_NAME" > /dev/null 2>&1 || true
-}
-trap cleanup EXIT
+log_debug "ini=$INI profile=$PROFILE image=$IMAGE"
+log_info  "profile ${BOLD}[$PROFILE]${NC} → ${BOLD}$IMAGE${NC}"
+log_info  "run: ${BOLD}$RUN${NC}"
+echo -e "${GRAY}───────────────────────────────────────────────────${NC}"
 
-log_info "Starting Docker container..."
-docker run -d --rm -v "$(pwd):/work" -w /work --name "$CONTAINER_NAME" "$IMAGE" sleep infinity > /dev/null
-
-STEP_COUNT=$(yq -r --arg JOB_NAME "$JOB_NAME" '.jobs[$JOB_NAME].steps | length' "$WORKFLOW_FILE")
-log_info "Found $STEP_COUNT steps."
-
-for (( i=0; i<$STEP_COUNT; i++ )); do
-    echo -e "${GRAY}───────────────────────────────────────────────────${NC}"
-    
-    STEP_NAME=$(yq -r --arg JOB_NAME "$JOB_NAME" --argjson idx "$i" '.jobs[$JOB_NAME].steps[$idx].name // "Step \($idx + 1)"' "$WORKFLOW_FILE")
-    STEP_RUN=$(yq -r --arg JOB_NAME "$JOB_NAME" --argjson idx "$i" '.jobs[$JOB_NAME].steps[$idx].run' "$WORKFLOW_FILE")
-    STEP_USES=$(yq -r --arg JOB_NAME "$JOB_NAME" --argjson idx "$i" '.jobs[$JOB_NAME].steps[$idx].uses' "$WORKFLOW_FILE")
-    STEP_DUMP=$(yq -r --arg JOB_NAME "$JOB_NAME" --argjson idx "$i" '.jobs[$JOB_NAME].steps[$idx]' "$WORKFLOW_FILE")
-
-    log_debug "Step data: $STEP_DUMP"
-
-    if echo "$STEP_DUMP" | grep -iqE "secrets\.|github\.token"; then
-        log_warn "SKIPPING '${BOLD}$STEP_NAME${NC}': Contains secrets."
-        continue
-    fi
-
-    log_info "running '${BOLD}$STEP_NAME${NC}'"
-
-    if [ "$STEP_USES" != "null" ]; then
-        log_warn "Action usage '$STEP_USES' detected. (Not supported, skipping)"
-        continue
-    fi
-
-    if [ "$STEP_RUN" != "null" ]; then
-        TMP_SCRIPT=".laction-step-$i.sh"
-        echo "#!/bin/sh" > "$TMP_SCRIPT"
-        echo "set -e" >> "$TMP_SCRIPT"
-        echo "$STEP_RUN" >> "$TMP_SCRIPT"
-        chmod +x "$TMP_SCRIPT"
-        
-        log_debug "Executing script content:\n$STEP_RUN"
-
-        if docker exec "$CONTAINER_NAME" /work/"$TMP_SCRIPT"; then
-            log_success "Step completed"
-        else
-            log_error "Step failed"
-            rm -f "$TMP_SCRIPT"
-            exit 1
-        fi
-        rm -f "$TMP_SCRIPT"
-    else
-        log_warn "No 'run' or 'uses' found. Skipping."
-    fi
-done
+docker run --rm -v "$PROJECT_DIR:/workspace" -w /workspace "$IMAGE" sh -c "$RUN"
 
 echo -e "${GRAY}───────────────────────────────────────────────────${NC}"
-log_success "Job '${BOLD}$JOB_NAME${NC}' completed successfully."
+log_success "Profile '${BOLD}$PROFILE${NC}' completed."
